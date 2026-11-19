@@ -1,6 +1,10 @@
+
 name: Build Maxim Boost Pro APK
 
-on:
+"on":
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -9,7 +13,6 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
 
@@ -23,7 +26,10 @@ jobs:
           gradle-version: '8.9'
 
       - name: Extract source
-        run: unzip MaximBoostPro-Android-CloudBuild.zip -d .
+        run: |
+          ZIP_FILE=$(find . -maxdepth 1 -name '*.zip' -print -quit)
+          test -n "$ZIP_FILE"
+          unzip "$ZIP_FILE" -d .
 
       - name: Build APK
         working-directory: MaximBoostPro
