@@ -25,11 +25,9 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Extract source
-        run: |
-          ZIP_FILE=$(find . -maxdepth 1 -name '*.zip' -print -quit)
-          test -n "$ZIP_FILE"
-          unzip "$ZIP_FILE" -d .
+      - name: Align Java target
+        run: sed -i 's/JavaVersion.VERSION_1_8/JavaVersion.VERSION_17/g' MaximBoostPro/app/build.gradle
+          ZIP_FILE=$(find . -maxdepth 1 -name '*.zip' -print
 
       - name: Build APK
         working-directory: MaximBoostPro
