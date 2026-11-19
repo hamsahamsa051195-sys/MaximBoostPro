@@ -2,8 +2,7 @@ name: Build Maxim Boost Pro APK
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -26,49 +25,66 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Extract Android project ZIP
+      - name: Find or extract Android project
         shell: bash
         run: |
           set -e
-          ZIP_FILE="$(find . -maxdepth 2 -type f -name '*.zip' -print -quit)"
-          if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: Tidak ditemukan file ZIP proyek Android."
-            exit 1
-          fi
-          mkdir -p extracted
-          unzip -q "$ZIP_FILE" -d extracted
+          PROJECT_DIR=""
 
-          PROJECT_DIR="$(find extracted -type f \( -name 'settings.gradle' -o -name 'settings.gradle.kts' \) -print -quit | xargs -r dirname)"
+          # First: find Android project already present in the repository.
+          SETTINGS_FILE="$(find . -path './.git' -prune -o -type f \( -name 'settings.gradle' -o -name 'settings.gradle.kts' \) -print -quit)"
+          if [ -n "$SETTINGS_FILE" ]; then
+            PROJECT_DIR="$(dirname "$SETTINGS_FILE")"
+          fi
+
+          # Otherwise: scan files for ZIP archives, including archives without .zip extension.
           if [ -z "$PROJECT_DIR" ]; then
-            echo "ERROR: ZIP tidak berisi settings.gradle atau settings.gradle.kts."
-            find extracted -maxdepth 4 -type f
+            mkdir -p extracted
+            while IFS= read -r FILE; do
+              if unzip -t "$FILE" >/dev/null 2>&1; then
+                echo "ZIP archive found: $FILE"
+                DEST="extracted/archive_$(basename "$FILE")"
+                mkdir -p "$DEST"
+                unzip -q "$FILE" -d "$DEST"
+                SETTINGS_FILE="$(find "$DEST" -type f \( -name 'settings.gradle' -o -name 'settings.gradle.kts' \) -print -quit)"
+                if [ -n "$SETTINGS_FILE" ]; then
+                  PROJECT_DIR="$(dirname "$SETTINGS_FILE")"
+                  break
+                fi
+              fi
+            done < <(find . -path './.git' -prune -o -path './extracted' -prune -o -type f -print)
+          fi
+
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "ERROR: Tidak ditemukan folder proyek Gradle Android atau arsip ZIP yang berisi proyek."
+            echo "File yang ada di repository:"
+            find . -path './.git' -prune -o -type f -print
             exit 1
           fi
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Project found at: $PROJECT_DIR"
 
-      - name: Align Java and Kotlin JVM targets to 17
+          echo "Android project directory: $PROJECT_DIR"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      - name: Align Java and Kotlin targets to 17
         shell: bash
         run: |
           set -e
-          APP_GRADLE="$(find "$PROJECT_DIR" -path '*/app/build.gradle' -o -path '*/app/build.gradle.kts' | head -n 1)"
-          if [ -n "$APP_GRADLE" ]; then
-            python3 - "$APP_GRADLE" <<'PY'
+          GRADLE_FILE="$(find "$PROJECT_DIR" -type f \( -name 'build.gradle' -o -name 'build.gradle.kts' \) -path '*/app/*' -print -quit)"
+          if [ -n "$GRADLE_FILE" ]; then
+            python3 - "$GRADLE_FILE" <<'PY'
           import pathlib, re, sys
           p = pathlib.Path(sys.argv[1])
           s = p.read_text()
-          # Update common Java 8 target declarations to Java 17.
           s = s.replace("JavaVersion.VERSION_1_8", "JavaVersion.VERSION_17")
           s = s.replace("JavaVersion.VERSION_8", "JavaVersion.VERSION_17")
           s = re.sub(r"(sourceCompatibility\s*=\s*)['\"]1\.8['\"]", r"\g<1>17", s)
           s = re.sub(r"(targetCompatibility\s*=\s*)['\"]1\.8['\"]", r"\g<1>17", s)
-          # Update Kotlin JVM target if it is explicitly set.
           s = re.sub(r"(jvmTarget\s*=\s*)['\"](?:1\.8|8)['\"]", r"\g<1>'17'", s)
           p.write_text(s)
-          print("Updated", p)
+          print("Adjusted JVM targets in", p)
           PY
           else
-            echo "No app/build.gradle found; continuing without patch."
+            echo "No app Gradle file found; build will run with existing project settings."
           fi
 
       - name: Build debug APK
@@ -76,8 +92,8 @@ jobs:
         run: |
           set -e
           cd "$PROJECT_DIR"
-          if [ -f ./gradlew ]; then
-            chmod +x ./gradlew
+          if [ -f gradlew ]; then
+            chmod +x gradlew
             ./gradlew --no-daemon assembleDebug
           else
             gradle --no-daemon assembleDebug
@@ -89,3 +105,4 @@ jobs:
           name: maxim-boost-pro-debug-apk
           path: ${{ env.PROJECT_DIR }}/**/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+          
